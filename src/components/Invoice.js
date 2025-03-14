@@ -1,4 +1,4 @@
-import { useContext } from "react";
+import React, { useState, useContext, useRef } from "react";
 import ClientDetails from "./ClientDetails";
 import Dates from "./Dates";
 import Footer from "./Footer";
@@ -39,7 +39,166 @@ function Invoice() {
     notes,
     setNotes,
     componentRef,
+    list, setList, // Get list from context
   } = useContext(State);
+
+  const [inputColor, setInputColor] = useState("black"); // Initial color
+
+
+  const [isPrinting, setIsPrinting] = useState(false);
+
+  const handlePrint = async () => {
+    setIsPrinting(true);
+
+    try {
+      // 1. Create Client
+      const clientResponse = await fetch("/api/clients", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          client_name: clientName,
+          client_address: clientAddress,
+          bank_name: bankName,
+          bank_account_number: bankAccount,
+        }),
+      });
+      const clientData = await clientResponse.json();
+      const clientId = clientData.insertId;
+
+      // 2. Create Invoice
+      const invoiceResponse = await fetch("/api/invoices", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          vendor_id: localStorage.getItem("vendorId"),
+          client_id: clientId,
+          invoice_number: invoiceNumber,
+          invoice_date: invoiceDate,
+          due_date: dueDate,
+          notes: notes,
+        }),
+      });
+      const invoiceData = await invoiceResponse.json();
+      const invoiceId = invoiceData.insertId;
+
+      // 3. Create Invoice Items (from list)
+      for (const item of list) {
+        await fetch("/api/invoice-items", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            invoice_id: invoiceId,
+            description: item.description,
+            quantity: item.quantity,
+            price: item.price,
+            amount: item.amount,
+          }),
+        });
+      }
+
+      // 4. Trigger print after data is saved
+      setTimeout(() => {
+        setIsPrinting(false);
+        componentRef.current.focus();
+        window.print();
+      }, 500);
+    } catch (error) {
+      console.error("Error saving invoice data:", error);
+      setIsPrinting(false);
+    }
+  };
+
+  const invoiceNumberInputRef = useRef(null); // Create a ref for the input
+
+  const handleInvoiceNumberFocus = () => {
+      if (!invoiceNumber) {
+          setInvoiceNumber(generateInvoiceId());
+      }
+      
+  };
+
+  function generateInvoiceId() {
+      const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+      let invoiceId = '';
+      for (let i = 0; i < 8; i++) {
+          invoiceId += characters.charAt(Math.floor(Math.random() * characters.length));
+      }
+      return invoiceId;
+  }
+  const handleInvoiceNumberChange = async (e) => {
+    const newInvoiceNumber = e.target.value;
+    setInvoiceNumber(newInvoiceNumber);
+
+    if (newInvoiceNumber.length === 8) {
+      setInputColor("black"); // Reset color
+
+      try {
+        const response = await fetch(`/api/invoices/${newInvoiceNumber}`);
+        if (response.ok) {
+          const invoiceData = await response.json();
+
+          if (invoiceData) {
+            setName(invoiceData.vendor.name);
+            setAddress(invoiceData.vendor.address);
+            setEmail(invoiceData.vendor.email);
+            setPhone(invoiceData.vendor.phone);
+            setWebsite(invoiceData.vendor.website);
+
+            setClientName(invoiceData.client.client_name);
+            setClientAddress(invoiceData.client.client_address);
+            setBankName(invoiceData.client.bank_name);
+            setBankAccount(invoiceData.client.bank_account_number);
+
+            setInvoiceDate(invoiceData.invoice.invoice_date);
+            setDueDate(invoiceData.invoice.due_date);
+            setNotes(invoiceData.invoice.notes);
+
+            const itemsResponse = await fetch(`/api/invoice-items/${newInvoiceNumber}`);
+            if (itemsResponse.ok) {
+              const itemsData = await itemsResponse.json();
+              setList(itemsData);
+            } else {
+              console.error("Failed to fetch invoice items");
+              setList([]);
+            }
+          } else {
+            clearAllFields();
+          }
+        } else {
+          console.error("Failed to fetch invoice data");
+          clearAllFields();
+        }
+      } catch (error) {
+        console.error("Error fetching invoice data:", error);
+        clearAllFields();
+      }
+    } else {
+      setInputColor("red"); // Set color to red
+      clearAllFields();
+    }
+  };
+
+  const clearAllFields = () => {
+    setName("");
+    setAddress("");
+    setEmail("");
+    setPhone("");
+    setWebsite("");
+    setClientName("");
+    setClientAddress("");
+    setBankName("");
+    setBankAccount("");
+    setInvoiceDate("");
+    setDueDate("");
+    setNotes("");
+    setList([]);
+  };
 
   return (
     <>
@@ -201,7 +360,10 @@ function Invoice() {
                     placeholder="Invoice Number"
                     autoComplete="off"
                     value={invoiceNumber}
-                    onChange={(e) => setInvoiceNumber(e.target.value)}
+                    onChange={handleInvoiceNumberChange}
+                    onFocus={handleInvoiceNumberFocus} // Add onFocus event
+                    style={{ color: inputColor }}
+                    ref={invoiceNumberInputRef} // Attach ref to input
                   />
                 </div>
 
@@ -256,7 +418,10 @@ function Invoice() {
         <div className="invoice__preview bg-white p-5 rounded-2xl border-4 border-blue-200">
           <ReactToPrint
             trigger={() => (
-              <button className="bg-blue-500 ml-5 text-white font-bold py-2 px-8 rounded hover:bg-blue-600 hover:text-white transition-all duration-150 hover:ring-4 hover:ring-blue-400">
+              <button className="bg-blue-500 ml-5 text-white font-bold py-2 px-8 rounded hover:bg-blue-600 hover:text-white transition-all duration-150 hover:ring-4 hover:ring-blue-400"
+              onClick={handlePrint}
+              disabled={isPrinting}
+              >
                 Print / Download
               </button>
             )}
